@@ -1670,9 +1670,10 @@ export const createInternalAdapter = (
 				const key = `verification:${storedIdentifier}`;
 				const cached = await secondaryStorage.get(key);
 				const parsed = cached ? safeJSONParse<Verification>(cached) : null;
-				const updated = parsed?.id === id ? { ...parsed, ...data } : null;
+				const updated =
+					parsed && parsed.id === id ? { ...parsed, ...data } : null;
 				if (updated) {
-					const expiresAt = updated.expiresAt ?? parsed!.expiresAt;
+					const expiresAt = updated.expiresAt;
 					const ttl = getTTLSeconds(
 						expiresAt instanceof Date ? expiresAt : new Date(expiresAt),
 					);

@@ -523,6 +523,39 @@ describe("internal adapter test", async () => {
 		).toMatchObject({ id: current.id, expiresAt: current.expiresAt });
 	});
 
+	it("should not write a phantom cached row when updating by id misses the cache", async () => {
+		const storage = new Map<string, string>();
+		const storageOnlyOpts = {
+			database: new DatabaseSync(":memory:"),
+			secondaryStorage: createStringSecondaryStorage(storage, new Map()),
+			verification: { storeIdentifier: "hashed" as const },
+		} satisfies BetterAuthOptions;
+		(await getMigrations(storageOnlyOpts)).runMigrations();
+		const storageOnlyCtx = await init(storageOnlyOpts);
+
+		// A row cached before `storeIdentifier` was enabled sits under the plain
+		// key and carries no id, so its reader passes `undefined` as the id.
+		const legacy = {
+			identifier: "update-by-id-cache-miss",
+			value: "legacy:0",
+			expiresAt: new Date(Date.now() + 60_000),
+		};
+		storage.set(`verification:${legacy.identifier}`, JSON.stringify(legacy));
+
+		const updated = await storageOnlyCtx.internalAdapter.updateVerificationById(
+			legacy.identifier,
+			undefined as unknown as string,
+			{ expiresAt: new Date(Date.now() + 120_000) },
+		);
+		expect(updated).toBeNull();
+		expect([...storage.keys()]).toEqual([`verification:${legacy.identifier}`]);
+		expect(
+			await storageOnlyCtx.internalAdapter.findVerificationValue(
+				legacy.identifier,
+			),
+		).toMatchObject({ value: "legacy:0" });
+	});
+
 	it("should run the after-update hook only when updating by id matched a row", async () => {
 		const updateAfter = vi.fn();
 		const hookedOpts = {
