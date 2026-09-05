@@ -2583,6 +2583,42 @@ describe("email-otp send failures", async () => {
 		});
 		expect(res.data?.success).toBe(true);
 	});
+
+	it("should keep deferring the send when a background task handler is configured", async () => {
+		const deferred: Promise<unknown>[] = [];
+		const { client: deferringClient, testUser: deferringUser } =
+			await getTestInstance(
+				{
+					advanced: {
+						backgroundTasks: {
+							handler: (promise) => {
+								deferred.push(promise);
+							},
+						},
+					},
+					plugins: [
+						emailOTP({
+							async sendVerificationOTP() {
+								throw sendError;
+							},
+						}),
+					],
+				},
+				{
+					clientOptions: {
+						plugins: [emailOTPClient()],
+					},
+				},
+			);
+
+		const res = await deferringClient.emailOtp.sendVerificationOtp({
+			email: deferringUser.email,
+			type: "sign-in",
+		});
+		expect(res.data?.success).toBe(true);
+		expect(deferred).toHaveLength(1);
+		await expect(deferred[0]).resolves.toBeUndefined();
+	});
 });
 
 describe("email-otp verify-email cookie cache isolation", async () => {
