@@ -2700,6 +2700,83 @@ describe("email-otp concurrent sends on a unique verification identifier", async
 		expect(res.data?.token).toBeDefined();
 	});
 
+	it("should store and deliver its own code when the row it lost to is consumed before reuse", async () => {
+		const otps: string[] = [];
+		const { client, auth } = await getTestInstance(
+			{
+				plugins: [
+					uniqueVerificationIdentifier,
+					emailOTP({
+						async sendVerificationOTP({ otp }) {
+							otps.push(otp);
+						},
+					}),
+				],
+			},
+			{
+				clientOptions: {
+					plugins: [emailOTPClient()],
+				},
+			},
+		);
+		const email = "concurrent-consumed@example.com";
+		const identifier = `sign-in-otp-${email}`;
+		const context = await auth.$context;
+		const pending = await context.internalAdapter.createVerificationValue({
+			identifier,
+			value: "000000:0",
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+
+		// The request looked the identifier up before the pending row appeared,
+		// loses its insert to that row and sets out to deliver its code. Before it
+		// extends the row, a sign-in with that code consumes it; nobody is
+		// delivering anything any more, so the request must store and deliver its
+		// own code rather than answer success with no email.
+		const internalAdapter = context.internalAdapter;
+		let lookups = 0;
+		context.internalAdapter = {
+			...internalAdapter,
+			async findVerificationValue(id) {
+				if (id === identifier && lookups++ === 0) return null;
+				return internalAdapter.findVerificationValue(id);
+			},
+		};
+		const adapter = context.adapter;
+		let consumed = false;
+		context.adapter = {
+			...adapter,
+			async update(data) {
+				if (data.model === "verification" && !consumed) {
+					consumed = true;
+					await adapter.delete({
+						model: "verification",
+						where: [{ field: "id", value: pending.id }],
+					});
+				}
+				return adapter.update(data);
+			},
+		};
+
+		const result = await client.emailOtp.sendVerificationOtp({
+			email,
+			type: "sign-in",
+		});
+		expect(result.error).toBeNull();
+
+		expect(otps).toHaveLength(1);
+		expect(otps[0]).not.toBe("000000");
+
+		const rows = await adapter.findMany({
+			model: "verification",
+			where: [{ field: "identifier", value: identifier }],
+		});
+		expect(rows).toHaveLength(1);
+
+		const res = await client.signIn.emailOtp({ email, otp: otps[0]! });
+		expect(res.data?.token).toBeDefined();
+	});
+
 	it("should fail the request when the insert succeeded but a create hook failed", async () => {
 		const otps: string[] = [];
 		const { client } = await getTestInstance(
@@ -2835,9 +2912,8 @@ describe("email-otp concurrent sends on a unique verification identifier", async
 		// The first request looked the identifier up before the pending row
 		// appeared, so its insert loses to that row and it sets out to deliver the
 		// pending code. Before it extends that row, a resend that had seen the row
-		// rotates it; the first request must then leave the delivery to the resend
-		// rather than email the code it read, which the rotation has just
-		// invalidated.
+		// rotates it; the first request must then deliver the rotated code rather
+		// than the code it read, which the rotation has just invalidated.
 		const internalAdapter = context.internalAdapter;
 		let lookups = 0;
 		context.internalAdapter = {
@@ -2870,7 +2946,8 @@ describe("email-otp concurrent sends on a unique verification identifier", async
 		});
 		expect(result.error).toBeNull();
 
-		expect(otps).toHaveLength(1);
+		expect(otps).toHaveLength(2);
+		expect(otps[1]).toBe(otps[0]);
 		expect(otps[0]).not.toBe("000000");
 
 		const rows = await adapter.findMany({

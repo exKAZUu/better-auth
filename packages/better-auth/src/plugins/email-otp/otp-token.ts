@@ -91,7 +91,7 @@ async function retrieveOTP(
  * Whether a stored OTP can still be verified: not expired and not out of
  * attempts.
  */
-export function isPendingOTP(
+function isPendingOTP(
 	opts: RequiredEmailOTPOptions,
 	existing: Verification,
 ): boolean {
@@ -101,21 +101,27 @@ export function isPendingOTP(
 	return !attempts || parseInt(attempts) < allowedAttempts;
 }
 
+export type ReuseOTPResult =
+	| { status: "reused"; otp: string }
+	/** The row holds a pending code that cannot be read back (hashed storage). */
+	| { status: "unrecoverable" }
+	/** The row is expired, out of attempts, or gone. */
+	| { status: "unusable" };
+
 /**
  * Tries to reuse the stored OTP row the caller has read.
- * Returns the plain-text OTP if reusable, `null` otherwise.
  */
 export async function tryReuseOTP(
 	ctx: GenericEndpointContext,
 	opts: RequiredEmailOTPOptions,
 	identifier: string,
 	existing: Verification,
-): Promise<string | null> {
-	if (!isPendingOTP(opts, existing)) return null;
+): Promise<ReuseOTPResult> {
+	if (!isPendingOTP(opts, existing)) return { status: "unusable" };
 
 	const [storedOtpValue] = splitAtLastColon(existing.value);
 	const plainOtp = await retrieveOTP(ctx, opts, storedOtpValue);
-	if (!plainOtp) return null;
+	if (!plainOtp) return { status: "unrecoverable" };
 
 	// Extend only the row that was read: a concurrent request may have replaced
 	// it in the meantime, and extending the replacement while returning this
@@ -126,7 +132,7 @@ export async function tryReuseOTP(
 		existing.id,
 		{ expiresAt: getDate(opts.expiresIn, "sec") },
 	);
-	if (!extended) return null;
+	if (!extended) return { status: "unusable" };
 
-	return plainOtp;
+	return { status: "reused", otp: plainOtp };
 }

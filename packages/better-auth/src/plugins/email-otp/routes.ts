@@ -16,12 +16,7 @@ import { revokeUnprovenAccountAccess } from "../../db/revoke-unproven-account-ac
 import { parseUserInput, parseUserOutput } from "../../db/schema";
 import { getDate } from "../../utils/date";
 import { EMAIL_OTP_ERROR_CODES as ERROR_CODES } from "./error-codes";
-import {
-	isPendingOTP,
-	storeOTP,
-	tryReuseOTP,
-	verifyStoredOTP,
-} from "./otp-token";
+import { storeOTP, tryReuseOTP, verifyStoredOTP } from "./otp-token";
 import type { EmailOTPOptions, RequiredEmailOTPOptions } from "./types";
 import { splitAtLastColon, toOTPIdentifier } from "./utils";
 
@@ -51,8 +46,8 @@ async function resolveOTP(
 	let seen =
 		await ctx.context.internalAdapter.findVerificationValue(identifier);
 	if (opts.resendStrategy === "reuse" && seen) {
-		const reused = await tryReuseOTP(ctx, opts, identifier, seen);
-		if (reused) return reused;
+		const reuse = await tryReuseOTP(ctx, opts, identifier, seen);
+		if (reuse.status === "reused") return reuse.otp;
 	}
 
 	const otp =
@@ -97,9 +92,9 @@ async function resolveOTP(
 				: current?.value === verification.value;
 			if (inserted) throw error;
 			if (current && current.id !== seen?.id) {
-				const concurrent = await tryReuseOTP(ctx, opts, identifier, current);
-				if (concurrent) return concurrent;
-				if (isPendingOTP(opts, current)) return null;
+				const reuse = await tryReuseOTP(ctx, opts, identifier, current);
+				if (reuse.status === "reused") return reuse.otp;
+				if (reuse.status === "unrecoverable") return null;
 			}
 			if (pass >= 2) throw error;
 			seen = current;
