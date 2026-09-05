@@ -523,6 +523,45 @@ describe("internal adapter test", async () => {
 		).toMatchObject({ id: current.id, expiresAt: current.expiresAt });
 	});
 
+	it("should run the after-update hook only when updating by id matched a row", async () => {
+		const updateAfter = vi.fn();
+		const hookedOpts = {
+			database: new DatabaseSync(":memory:"),
+			databaseHooks: {
+				verification: {
+					update: {
+						after: async (verification: Verification) => {
+							updateAfter(verification.id);
+						},
+					},
+				},
+			},
+		} satisfies BetterAuthOptions;
+		(await getMigrations(hookedOpts)).runMigrations();
+		const hookedCtx = await init(hookedOpts);
+		const verification =
+			await hookedCtx.internalAdapter.createVerificationValue({
+				identifier: "update-by-id-hooks",
+				value: "update-by-id-hooks",
+				expiresAt: new Date(Date.now() + 1000),
+			});
+
+		const missed = await hookedCtx.internalAdapter.updateVerificationById(
+			verification.identifier,
+			"no-such-id",
+			{ expiresAt: new Date(Date.now() + 5000) },
+		);
+		expect(missed).toBeNull();
+		expect(updateAfter).not.toHaveBeenCalled();
+
+		await hookedCtx.internalAdapter.updateVerificationById(
+			verification.identifier,
+			verification.id,
+			{ expiresAt: new Date(Date.now() + 5000) },
+		);
+		expect(updateAfter).toHaveBeenCalledExactlyOnceWith(verification.id);
+	});
+
 	it("should update by id a row that is only reachable through the plain identifier fallback", async () => {
 		const hashedOpts = {
 			database: new DatabaseSync(":memory:"),

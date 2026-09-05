@@ -153,6 +153,12 @@ export function getWithHooks(
 					})
 				: customUpdated;
 
+		// A guarded update that matched no row updated nothing, so the after
+		// hooks, which receive the updated row, have nothing to run on.
+		if (!updated) {
+			return updated;
+		}
+
 		for (const { source, hooks } of hooksEntries) {
 			const toRun = hooks[model]?.update?.after;
 			if (toRun) {
