@@ -2939,7 +2939,7 @@ describe("email-otp concurrent sends on a unique verification identifier", async
 		expect(res.data?.token).toBeDefined();
 	});
 
-	it("should hand over to the replacement when the reused row is rotated before it is extended", async () => {
+	it("should deliver the rotated code when the reused row is rotated before it is extended", async () => {
 		const otps: string[] = [];
 		const { client, auth } = await getTestInstance(
 			{

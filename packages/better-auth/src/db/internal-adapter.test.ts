@@ -523,6 +523,58 @@ describe("internal adapter test", async () => {
 		).toMatchObject({ id: current.id, expiresAt: current.expiresAt });
 	});
 
+	it("should refresh the cache only from the row the database updated by id", async () => {
+		const storage = new Map<string, string>();
+		const cachedOpts = {
+			database: new DatabaseSync(":memory:"),
+			secondaryStorage: createStringSecondaryStorage(storage, new Map()),
+			verification: { storeInDatabase: true },
+		} satisfies BetterAuthOptions;
+		(await getMigrations(cachedOpts)).runMigrations();
+		const cachedCtx = await init(cachedOpts);
+		const identifier = "update-by-id-cache-refresh";
+		const key = `verification:${identifier}`;
+
+		const replaced = await cachedCtx.internalAdapter.createVerificationValue({
+			identifier,
+			value: "old",
+			expiresAt: new Date(Date.now() + 1000),
+		});
+		await cachedCtx.internalAdapter.deleteVerificationById(
+			identifier,
+			replaced.id,
+		);
+		const current = await cachedCtx.internalAdapter.createVerificationValue({
+			identifier,
+			value: "new",
+			expiresAt: new Date(Date.now() + 1000),
+		});
+		// A reader that still holds the replaced row tries to extend it.
+		const stale = JSON.stringify(replaced);
+		storage.set(key, stale);
+
+		const missed = await cachedCtx.internalAdapter.updateVerificationById(
+			identifier,
+			replaced.id,
+			{ expiresAt: new Date(Date.now() + 60_000) },
+		);
+		expect(missed).toBeNull();
+		expect(storage.get(key)).toBe(stale);
+
+		const expiresAt = new Date(Date.now() + 60_000);
+		const updated = await cachedCtx.internalAdapter.updateVerificationById(
+			identifier,
+			current.id,
+			{ expiresAt },
+		);
+		expect(updated).toMatchObject({ id: current.id, value: "new" });
+		expect(JSON.parse(storage.get(key)!)).toMatchObject({
+			id: current.id,
+			value: "new",
+			expiresAt: expiresAt.toISOString(),
+		});
+	});
+
 	it("should not write a phantom cached row when updating by id misses the cache", async () => {
 		const storage = new Map<string, string>();
 		const storageOnlyOpts = {

@@ -1665,33 +1665,41 @@ export const createInternalAdapter = (
 				identifier,
 				storageOption,
 			);
+			const key = `verification:${storedIdentifier}`;
+			const cache = async (verification: Verification) => {
+				const expiresAt = verification.expiresAt;
+				const ttl = getTTLSeconds(
+					expiresAt instanceof Date ? expiresAt : new Date(expiresAt),
+				);
+				if (ttl > 0) {
+					await secondaryStorage!.set(key, JSON.stringify(verification), ttl);
+				}
+			};
 
-			if (secondaryStorage) {
-				const key = `verification:${storedIdentifier}`;
+			if (secondaryStorage && !options.verification?.storeInDatabase) {
 				const cached = await secondaryStorage.get(key);
 				const parsed = cached ? safeJSONParse<Verification>(cached) : null;
-				const updated =
-					parsed && parsed.id === id ? { ...parsed, ...data } : null;
-				if (updated) {
-					const expiresAt = updated.expiresAt;
-					const ttl = getTTLSeconds(
-						expiresAt instanceof Date ? expiresAt : new Date(expiresAt),
-					);
-					if (ttl > 0) {
-						await secondaryStorage.set(key, JSON.stringify(updated), ttl);
-					}
+				if (!parsed || parsed.id !== id) {
+					return null;
 				}
-				if (!options.verification?.storeInDatabase) {
-					return updated;
-				}
+				const updated = { ...parsed, ...data };
+				await cache(updated);
+				return updated;
 			}
 
-			return await updateWithHooks<Verification>(
+			// The database decides whether the row is still there; the cache is only
+			// refreshed from the row it returned, so a row a concurrent request has
+			// replaced in the meantime is never written back with a longer expiry.
+			const updated = await updateWithHooks<Verification>(
 				data,
 				[{ field: "id", value: id }],
 				"verification",
 				undefined,
 			);
+			if (updated && secondaryStorage) {
+				await cache(updated);
+			}
+			return updated;
 		},
 		refreshUserSessions,
 	};
