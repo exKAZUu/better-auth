@@ -2777,6 +2777,64 @@ describe("email-otp concurrent sends on a unique verification identifier", async
 		expect(res.data?.token).toBeDefined();
 	});
 
+	it("should resend and reuse equal codes when the database assigns the ids", async () => {
+		const otps: string[] = [];
+		const { client, auth } = await getTestInstance(
+			{
+				advanced: { database: { generateId: "serial" } },
+				plugins: [
+					uniqueVerificationIdentifier,
+					emailOTP({
+						generateOTP: () => "424242",
+						async sendVerificationOTP({ otp }) {
+							otps.push(otp);
+						},
+					}),
+				],
+			},
+			{
+				clientOptions: {
+					plugins: [emailOTPClient()],
+				},
+			},
+		);
+		const email = "serial-equal-codes@example.com";
+		const identifier = `sign-in-otp-${email}`;
+
+		// A sequential resend replaces a row holding the same value.
+		await client.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
+		const resent = await client.emailOtp.sendVerificationOtp({
+			email,
+			type: "sign-in",
+		});
+		expect(resent.error).toBeNull();
+		expect(otps).toEqual(["424242", "424242"]);
+
+		// Concurrent first sends hand over to a row holding the same value.
+		const context = await auth.$context;
+		await context.internalAdapter.deleteVerificationByIdentifier(identifier);
+		const internalAdapter = context.internalAdapter;
+		let lookups = 0;
+		context.internalAdapter = {
+			...internalAdapter,
+			async findVerificationValue(id) {
+				if (id === identifier && lookups++ < 2) return null;
+				return internalAdapter.findVerificationValue(id);
+			},
+		};
+		const results = await Promise.all([
+			client.emailOtp.sendVerificationOtp({ email, type: "sign-in" }),
+			client.emailOtp.sendVerificationOtp({ email, type: "sign-in" }),
+		]);
+		for (const result of results) {
+			expect(result.error).toBeNull();
+		}
+		expect(otps).toEqual(["424242", "424242", "424242", "424242"]);
+
+		const res = await client.signIn.emailOtp({ email, otp: "424242" });
+		expect(res.data?.token).toBeDefined();
+	});
+
 	it("should fail the request when the insert succeeded but a create hook failed", async () => {
 		const otps: string[] = [];
 		const { client } = await getTestInstance(

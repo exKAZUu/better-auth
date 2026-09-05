@@ -261,9 +261,8 @@ export interface InternalAdapter<
 	 * Delete one verification row by `id`, leaving any other row stored under
 	 * the same `identifier` in the meantime untouched. Use it instead of
 	 * `deleteVerificationByIdentifier` when replacing a row that a concurrent
-	 * request may have replaced already. Rows kept only in secondary storage
-	 * (no `verification.storeInDatabase`) carry no `id`; there the cached row
-	 * is treated as the addressed one, like `deleteVerificationByIdentifier`.
+	 * request may have replaced already. In secondary storage the cached row is
+	 * addressed only when it carries this `id`.
 	 */
 	deleteVerificationById(identifier: string, id: string): Promise<void>;
 
@@ -309,9 +308,8 @@ export interface InternalAdapter<
 	 * Update one verification row by `id`, leaving any other row stored under
 	 * the same `identifier` in the meantime untouched. Returns `null` when that
 	 * row no longer exists, so a caller that read the row before can tell that
-	 * a concurrent request has replaced it. Rows kept only in secondary storage
-	 * (no `verification.storeInDatabase`) carry no `id`; there the cached row
-	 * is treated as the addressed one, like `updateVerificationByIdentifier`.
+	 * a concurrent request has replaced it. In secondary storage the cached row
+	 * is addressed only when it carries this `id`.
 	 */
 	updateVerificationById(
 		identifier: string,

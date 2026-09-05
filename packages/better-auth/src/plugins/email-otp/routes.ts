@@ -55,7 +55,7 @@ async function resolveOTP(
 	// Choose the row's id here so that the row this request inserted can be told
 	// apart from one a concurrent request inserted, which may hold the same code
 	// (`generateOTP` can be deterministic). Databases that assign ids themselves
-	// ignore it; there the stored value has to do.
+	// leave no way to tell the two apart.
 	const id = ctx.context.generateId({ model: "verification" });
 	const verification = {
 		...(id ? { id } : {}),
@@ -86,11 +86,9 @@ async function resolveOTP(
 				await ctx.context.internalAdapter.findVerificationValue(identifier);
 			// The insert itself succeeded and something after it failed (such as a
 			// `verification.create.after` hook), which is not a conflict to recover
-			// from.
-			const inserted = id
-				? current?.id === id
-				: current?.value === verification.value;
-			if (inserted) throw error;
+			// from. Without a chosen id this cannot be told from a conflict, and a
+			// conflict is what the failure almost always is.
+			if (id && current?.id === id) throw error;
 			if (current && current.id !== seen?.id) {
 				const reuse = await tryReuseOTP(ctx, opts, identifier, current);
 				if (reuse.status === "reused") return reuse.otp;
