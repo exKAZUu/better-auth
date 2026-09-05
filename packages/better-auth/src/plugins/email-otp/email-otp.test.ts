@@ -2835,10 +2835,19 @@ describe("email-otp concurrent sends on a unique verification identifier", async
 		expect(res.data?.token).toBeDefined();
 	});
 
-	it("should fail the request when the insert succeeded but a create hook failed", async () => {
+	it.each([
+		{ ids: "generated", advanced: {} },
+		{
+			ids: "assigned by the database",
+			advanced: { database: { generateId: "serial" as const } },
+		},
+	])("should fail the request when the insert succeeded but a create hook failed (ids $ids)", async ({
+		advanced,
+	}) => {
 		const otps: string[] = [];
 		const { client } = await getTestInstance(
 			{
+				advanced,
 				databaseHooks: {
 					verification: {
 						create: {

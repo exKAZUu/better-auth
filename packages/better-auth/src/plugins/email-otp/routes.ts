@@ -14,6 +14,7 @@ import { setCookieCache, setSessionCookie } from "../../cookies";
 import { generateRandomString, symmetricDecrypt } from "../../crypto";
 import { revokeUnprovenAccountAccess } from "../../db/revoke-unproven-account-access";
 import { parseUserInput, parseUserOutput } from "../../db/schema";
+import { getCreatedRow } from "../../db/with-hooks";
 import { getDate } from "../../utils/date";
 import { EMAIL_OTP_ERROR_CODES as ERROR_CODES } from "./error-codes";
 import { storeOTP, tryReuseOTP, verifyStoredOTP } from "./otp-token";
@@ -52,13 +53,7 @@ async function resolveOTP(
 
 	const otp =
 		opts.generateOTP({ email, type }, ctx) || defaultOTPGenerator(opts);
-	// Choose the row's id here so that the row this request inserted can be told
-	// apart from one a concurrent request inserted, which may hold the same code
-	// (`generateOTP` can be deterministic). Databases that assign ids themselves
-	// leave no way to tell the two apart.
-	const id = ctx.context.generateId({ model: "verification" });
 	const verification = {
-		...(id ? { id } : {}),
 		value: `${await storeOTP(ctx, opts, otp)}:0`,
 		identifier,
 		expiresAt: getDate(opts.expiresIn, "sec"),
@@ -82,13 +77,11 @@ async function resolveOTP(
 			await ctx.context.internalAdapter.createVerificationValue(verification);
 			return otp;
 		} catch (error) {
+			// The insert itself succeeded and a `verification.create.after` hook
+			// failed, which is not a conflict to recover from.
+			if (getCreatedRow(error)) throw error;
 			const current =
 				await ctx.context.internalAdapter.findVerificationValue(identifier);
-			// The insert itself succeeded and something after it failed (such as a
-			// `verification.create.after` hook), which is not a conflict to recover
-			// from. Without a chosen id this cannot be told from a conflict, and a
-			// conflict is what the failure almost always is.
-			if (id && current?.id === id) throw error;
 			if (current && current.id !== seen?.id) {
 				const reuse = await tryReuseOTP(ctx, opts, identifier, current);
 				if (reuse.status === "reused") return reuse.otp;

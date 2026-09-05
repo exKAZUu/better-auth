@@ -18,6 +18,34 @@ export type DatabaseHooksEntry = {
 	hooks: Exclude<BetterAuthOptions["databaseHooks"], undefined>;
 };
 
+const createdRow = Symbol("better-auth.createdRow");
+
+/**
+ * Attaches the row `createWithHooks` had already created to an error thrown
+ * afterwards (by a `create.after` hook), so that a caller can tell it from an
+ * error thrown by the insert itself.
+ */
+function markCreatedRow(error: unknown, created: unknown): unknown {
+	if (typeof error === "object" && error !== null) {
+		try {
+			Object.defineProperty(error, createdRow, { value: created });
+		} catch {
+			// A frozen error cannot carry the row; the caller then sees a plain error.
+		}
+	}
+	return error;
+}
+
+/**
+ * The row that `createWithHooks` had created when `error` was thrown, or
+ * `undefined` when the error came from the insert itself.
+ */
+export function getCreatedRow<T>(error: unknown): T | undefined {
+	return typeof error === "object" && error !== null
+		? ((error as Record<symbol, T>)[createdRow] ?? undefined)
+		: undefined;
+}
+
 export function getWithHooks(
 	adapter: DBAdapter<BetterAuthOptions>,
 	ctx: {
@@ -77,23 +105,27 @@ export function getWithHooks(
 			created = await customCreateFn.fn(created ?? actualData);
 		}
 
-		for (const { source, hooks } of hooksEntries) {
-			const toRun = hooks[model]?.create?.after;
-			if (toRun) {
-				await queueAfterTransactionHook(async () => {
-					await withSpan(
-						`db create.after ${model}`,
-						{
-							[ATTR_HOOK_TYPE]: "create.after",
-							[ATTR_DB_COLLECTION_NAME]: model,
-							[ATTR_CONTEXT]: source,
-						},
-						() =>
-							// @ts-expect-error context type mismatch
-							toRun(created as any, context),
-					);
-				});
+		try {
+			for (const { source, hooks } of hooksEntries) {
+				const toRun = hooks[model]?.create?.after;
+				if (toRun) {
+					await queueAfterTransactionHook(async () => {
+						await withSpan(
+							`db create.after ${model}`,
+							{
+								[ATTR_HOOK_TYPE]: "create.after",
+								[ATTR_DB_COLLECTION_NAME]: model,
+								[ATTR_CONTEXT]: source,
+							},
+							() =>
+								// @ts-expect-error context type mismatch
+								toRun(created as any, context),
+						);
+					});
+				}
 			}
+		} catch (error) {
+			throw markCreatedRow(error, created);
 		}
 
 		return created;
