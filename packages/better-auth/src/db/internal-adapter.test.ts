@@ -15,6 +15,7 @@ import type {
 	BetterAuthPlugin,
 	Session,
 	User,
+	Verification,
 } from "../types";
 import { getMigrations } from "./get-migration";
 
@@ -520,6 +521,39 @@ describe("internal adapter test", async () => {
 		expect(
 			await internalAdapter.findVerificationValue("update-by-id-replaced"),
 		).toMatchObject({ id: current.id, expiresAt: current.expiresAt });
+	});
+
+	it("should update by id a row that is only reachable through the plain identifier fallback", async () => {
+		const hashedOpts = {
+			database: new DatabaseSync(":memory:"),
+			verification: { storeIdentifier: "hashed" as const },
+		} satisfies BetterAuthOptions;
+		(await getMigrations(hashedOpts)).runMigrations();
+		const hashedCtx = await init(hashedOpts);
+
+		// A row written before `storeIdentifier` was enabled keeps its plain identifier.
+		const legacy = await hashedCtx.adapter.create<Verification>({
+			model: "verification",
+			data: {
+				identifier: "update-by-id-legacy",
+				value: "legacy",
+				expiresAt: new Date(Date.now() + 1000),
+				createdAt: new Date(),
+				updatedAt: new Date(),
+			},
+		});
+		const found = await hashedCtx.internalAdapter.findVerificationValue(
+			"update-by-id-legacy",
+		);
+		expect(found?.id).toBe(legacy.id);
+		const expiresAt = new Date(Date.now() + 5000);
+
+		const updated = await hashedCtx.internalAdapter.updateVerificationById(
+			"update-by-id-legacy",
+			legacy.id,
+			{ expiresAt },
+		);
+		expect(updated).toMatchObject({ id: legacy.id, expiresAt });
 	});
 
 	it("should not call adapter.delete for missing verification record (prevents Prisma P2025)", async () => {

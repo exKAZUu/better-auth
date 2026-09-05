@@ -1687,10 +1687,7 @@ export const createInternalAdapter = (
 
 			return await updateWithHooks<Verification>(
 				data,
-				[
-					{ field: "identifier", value: storedIdentifier },
-					{ field: "id", value: id },
-				],
+				[{ field: "id", value: id }],
 				"verification",
 				undefined,
 			);
