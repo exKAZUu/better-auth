@@ -523,7 +523,7 @@ describe("internal adapter test", async () => {
 		).toMatchObject({ id: current.id, expiresAt: current.expiresAt });
 	});
 
-	it("should refresh the cache only from the row the database updated by id", async () => {
+	it("should evict the cached row instead of rewriting it when updating by id", async () => {
 		const storage = new Map<string, string>();
 		const cachedOpts = {
 			database: new DatabaseSync(":memory:"),
@@ -532,7 +532,7 @@ describe("internal adapter test", async () => {
 		} satisfies BetterAuthOptions;
 		(await getMigrations(cachedOpts)).runMigrations();
 		const cachedCtx = await init(cachedOpts);
-		const identifier = "update-by-id-cache-refresh";
+		const identifier = "update-by-id-cache-evict";
 		const key = `verification:${identifier}`;
 
 		const replaced = await cachedCtx.internalAdapter.createVerificationValue({
@@ -549,18 +549,19 @@ describe("internal adapter test", async () => {
 			value: "new",
 			expiresAt: new Date(Date.now() + 1000),
 		});
-		// A reader that still holds the replaced row tries to extend it.
-		const stale = JSON.stringify(replaced);
-		storage.set(key, stale);
 
+		// A reader that still holds the replaced row tries to extend it while a
+		// concurrent replacement is cached: the replacement must stay cached.
 		const missed = await cachedCtx.internalAdapter.updateVerificationById(
 			identifier,
 			replaced.id,
 			{ expiresAt: new Date(Date.now() + 60_000) },
 		);
 		expect(missed).toBeNull();
-		expect(storage.get(key)).toBe(stale);
+		expect(JSON.parse(storage.get(key)!)).toMatchObject({ id: current.id });
 
+		// Extending the current row evicts the entry, so no later reader can be
+		// served a row the cache write might have overwritten.
 		const expiresAt = new Date(Date.now() + 60_000);
 		const updated = await cachedCtx.internalAdapter.updateVerificationById(
 			identifier,
@@ -568,11 +569,10 @@ describe("internal adapter test", async () => {
 			{ expiresAt },
 		);
 		expect(updated).toMatchObject({ id: current.id, value: "new" });
-		expect(JSON.parse(storage.get(key)!)).toMatchObject({
-			id: current.id,
-			value: "new",
-			expiresAt: expiresAt.toISOString(),
-		});
+		expect(storage.has(key)).toBe(false);
+		expect(
+			await cachedCtx.internalAdapter.findVerificationValue(identifier),
+		).toMatchObject({ id: current.id, expiresAt });
 	});
 
 	it("should not write a phantom cached row when updating by id misses the cache", async () => {

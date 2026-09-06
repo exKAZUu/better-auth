@@ -1666,15 +1666,6 @@ export const createInternalAdapter = (
 				storageOption,
 			);
 			const key = `verification:${storedIdentifier}`;
-			const cache = async (verification: Verification) => {
-				const expiresAt = verification.expiresAt;
-				const ttl = getTTLSeconds(
-					expiresAt instanceof Date ? expiresAt : new Date(expiresAt),
-				);
-				if (ttl > 0) {
-					await secondaryStorage!.set(key, JSON.stringify(verification), ttl);
-				}
-			};
 
 			if (secondaryStorage && !options.verification?.storeInDatabase) {
 				const cached = await secondaryStorage.get(key);
@@ -1683,21 +1674,34 @@ export const createInternalAdapter = (
 					return null;
 				}
 				const updated = { ...parsed, ...data };
-				await cache(updated);
+				const expiresAt = updated.expiresAt;
+				const ttl = getTTLSeconds(
+					expiresAt instanceof Date ? expiresAt : new Date(expiresAt),
+				);
+				if (ttl > 0) {
+					await secondaryStorage.set(key, JSON.stringify(updated), ttl);
+				}
 				return updated;
 			}
 
-			// The database decides whether the row is still there; the cache is only
-			// refreshed from the row it returned, so a row a concurrent request has
-			// replaced in the meantime is never written back with a longer expiry.
+			// The database decides whether the row is still there. The cache entry is
+			// evicted rather than rewritten: writing the row back could overwrite a
+			// replacement a concurrent request has just cached, whereas a miss is
+			// served from the database.
 			const updated = await updateWithHooks<Verification>(
 				data,
 				[{ field: "id", value: id }],
 				"verification",
 				undefined,
 			);
-			if (updated && secondaryStorage) {
-				await cache(updated);
+			if (secondaryStorage) {
+				const cached = await secondaryStorage.get(key);
+				if (
+					cached &&
+					(updated || safeJSONParse<Verification>(cached)?.id === id)
+				) {
+					await secondaryStorage.delete(key);
+				}
 			}
 			return updated;
 		},
