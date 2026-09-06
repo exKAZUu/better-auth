@@ -1384,13 +1384,13 @@ export const createInternalAdapter = (
 		},
 		deleteVerificationById: async (identifier: string, id: string) => {
 			if (secondaryStorage) {
+				// Every key is visited: a row left cached under a later key would
+				// resurface once the row shadowing it is consumed.
 				for (const key of await verificationCacheKeys(identifier)) {
 					const cached = await secondaryStorage.get(key);
-					const parsed = cached ? safeJSONParse<Verification>(cached) : null;
-					if (!parsed) continue;
-					// A row under a later key is shadowed by this one, so stop either way.
-					if (addressesRow(parsed, id)) await secondaryStorage.delete(key);
-					break;
+					if (cached && addressesRow(safeJSONParse<Verification>(cached), id)) {
+						await secondaryStorage.delete(key);
+					}
 				}
 			}
 

@@ -688,6 +688,50 @@ describe("internal adapter test", async () => {
 		).rejects.toSatisfy((error: unknown) => getCreatedRow(error) !== undefined);
 	});
 
+	it("should delete a cached row under a later key so it cannot resurface", async () => {
+		const storage = new Map<string, string>();
+		const cachedOpts = {
+			database: new DatabaseSync(":memory:"),
+			secondaryStorage: createStringSecondaryStorage(storage, new Map()),
+			verification: {
+				storeIdentifier: "hashed" as const,
+				storeInDatabase: true,
+			},
+		} satisfies BetterAuthOptions;
+		(await getMigrations(cachedOpts)).runMigrations();
+		const cachedCtx = await init(cachedOpts);
+		const identifier = "delete-shadowed-legacy-row";
+		const expiresAt = new Date(Date.now() + 60_000);
+
+		// The legacy row sits under the plain key, a newer row under the hashed one.
+		const legacy = await cachedCtx.adapter.create<Verification>({
+			model: "verification",
+			data: {
+				identifier,
+				value: "legacy:0",
+				expiresAt,
+				createdAt: new Date(),
+				updatedAt: new Date(),
+			},
+		});
+		storage.set(
+			`verification:${identifier}`,
+			JSON.stringify({ ...legacy, expiresAt }),
+		);
+		await cachedCtx.internalAdapter.createVerificationValue({
+			identifier,
+			value: "newer:0",
+			expiresAt,
+		});
+		expect([...storage.keys()]).toHaveLength(2);
+
+		await cachedCtx.internalAdapter.deleteVerificationById(
+			identifier,
+			legacy.id,
+		);
+		expect(storage.has(`verification:${identifier}`)).toBe(false);
+	});
+
 	it("should not address a cached row that a row under an earlier key shadows", async () => {
 		const storage = new Map<string, string>();
 		const storageOnlyOpts = {
