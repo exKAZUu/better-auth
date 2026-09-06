@@ -262,8 +262,8 @@ export interface InternalAdapter<
 	 * the same `identifier` in the meantime untouched. Use it instead of
 	 * `deleteVerificationByIdentifier` when replacing a row that a concurrent
 	 * request may have replaced already. In secondary storage the cached row is
-	 * addressed when its `id` equals this one, which includes rows kept only
-	 * there: they carry no `id`, and a reader of such a row passes none either.
+	 * addressed when its `id` equals this one; a row cached without an id is
+	 * addressed by none.
 	 */
 	deleteVerificationById(identifier: string, id: string): Promise<void>;
 
@@ -310,8 +310,8 @@ export interface InternalAdapter<
 	 * the same `identifier` in the meantime untouched. Returns `null` when that
 	 * row no longer exists, so a caller that read the row before can tell that
 	 * a concurrent request has replaced it. In secondary storage the cached row
-	 * is addressed when its `id` equals this one, which includes rows kept only
-	 * there: they carry no `id`, and a reader of such a row passes none either.
+	 * is addressed when its `id` equals this one; a row cached without an id is
+	 * addressed by none.
 	 */
 	updateVerificationById(
 		identifier: string,

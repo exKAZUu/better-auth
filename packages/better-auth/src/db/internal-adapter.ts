@@ -227,14 +227,14 @@ export const createInternalAdapter = (
 	}
 
 	/**
-	 * Whether `id` addresses the cached row. Rows kept only in secondary storage
-	 * carry no id, and a reader of such a row passes none either, so the two
-	 * match; a key that holds nothing is addressed by no id at all.
+	 * Whether `id` addresses the cached row. A row without an id, cached before
+	 * this method existed, is addressed by no id at all, as is a key that holds
+	 * nothing.
 	 */
 	const addressesRow = (
 		row: Verification | null,
 		id: string,
-	): row is Verification => row !== null && row.id === id;
+	): row is Verification => row?.id !== undefined && row.id === id;
 
 	/**
 	 * The cache keys a verification row can live under: the current one, and
@@ -1253,11 +1253,21 @@ export const createInternalAdapter = (
 				storageOption,
 			);
 
+			// When secondary storage is the only store, the database adapter won't
+			// run, so generate an id ourselves; the by-id methods need one to tell
+			// the addressed row from another.
+			let verificationId: string | undefined;
+			if (secondaryStorage && !options.verification?.storeInDatabase) {
+				const generatedId = ctx.generateId({ model: "verification" });
+				verificationId = generatedId !== false ? generatedId : generateId();
+			}
+
 			const verification = await createWithHooks(
 				{
 					// todo: we should remove auto setting createdAt and updatedAt in the next major release, since the db generators already handle that
 					createdAt: new Date(),
 					updatedAt: new Date(),
+					...(verificationId ? { id: verificationId } : {}),
 					...data,
 					identifier: storedIdentifier,
 				},
