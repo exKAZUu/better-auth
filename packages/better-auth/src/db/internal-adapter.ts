@@ -1386,9 +1386,11 @@ export const createInternalAdapter = (
 			if (secondaryStorage) {
 				for (const key of await verificationCacheKeys(identifier)) {
 					const cached = await secondaryStorage.get(key);
-					if (cached && addressesRow(safeJSONParse<Verification>(cached), id)) {
-						await secondaryStorage.delete(key);
-					}
+					const parsed = cached ? safeJSONParse<Verification>(cached) : null;
+					if (!parsed) continue;
+					// A row under a later key is shadowed by this one, so stop either way.
+					if (addressesRow(parsed, id)) await secondaryStorage.delete(key);
+					break;
 				}
 			}
 
@@ -1693,6 +1695,9 @@ export const createInternalAdapter = (
 				for (const key of keys) {
 					const cached = await secondaryStorage.get(key);
 					const parsed = cached ? safeJSONParse<Verification>(cached) : null;
+					// Reads resolve to the first key that holds a row, so a row under a
+					// later key is shadowed by it and must not be addressed.
+					if (parsed && !addressesRow(parsed, id)) return null;
 					if (!addressesRow(parsed, id)) continue;
 
 					const updated = { ...parsed, ...data };

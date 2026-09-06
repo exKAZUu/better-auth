@@ -688,6 +688,49 @@ describe("internal adapter test", async () => {
 		).rejects.toSatisfy((error: unknown) => getCreatedRow(error) !== undefined);
 	});
 
+	it("should not address a cached row that a row under an earlier key shadows", async () => {
+		const storage = new Map<string, string>();
+		const storageOnlyOpts = {
+			database: new DatabaseSync(":memory:"),
+			secondaryStorage: createStringSecondaryStorage(storage, new Map()),
+			verification: { storeIdentifier: "hashed" as const },
+		} satisfies BetterAuthOptions;
+		(await getMigrations(storageOnlyOpts)).runMigrations();
+		const storageOnlyCtx = await init(storageOnlyOpts);
+		const identifier = "shadowed-legacy-row";
+		const expiresAt = new Date(Date.now() + 60_000);
+
+		// A legacy row under the plain key, read before a newer row appeared under
+		// the hashed key, which is where every later read resolves.
+		const legacy = {
+			id: "legacy-id",
+			identifier,
+			value: "legacy:0",
+			expiresAt,
+		};
+		storage.set(`verification:${identifier}`, JSON.stringify(legacy));
+		const current =
+			await storageOnlyCtx.internalAdapter.createVerificationValue({
+				identifier,
+				value: "current:0",
+				expiresAt,
+			});
+		expect(
+			await storageOnlyCtx.internalAdapter.findVerificationValue(identifier),
+		).toMatchObject({ id: current.id, value: "current:0" });
+
+		expect(
+			await storageOnlyCtx.internalAdapter.updateVerificationById(
+				identifier,
+				legacy.id,
+				{ expiresAt: new Date(Date.now() + 120_000) },
+			),
+		).toBeNull();
+		expect(
+			JSON.parse(storage.get(`verification:${identifier}`)!),
+		).toMatchObject({ id: legacy.id });
+	});
+
 	it("should give a row kept only in secondary storage an id to address it by", async () => {
 		const storage = new Map<string, string>();
 		const storageOnlyOpts = {
