@@ -18,31 +18,24 @@ export type DatabaseHooksEntry = {
 	hooks: Exclude<BetterAuthOptions["databaseHooks"], undefined>;
 };
 
-const createdRow = Symbol("better-auth.createdRow");
+const createdRows = new WeakMap<object, unknown>();
 
 /**
- * Attaches the row `createWithHooks` had already created to an error thrown
- * afterwards (by a `create.after` hook), so that a caller can tell it from an
- * error thrown by the insert itself. A value that cannot carry the row (a
- * primitive, or a frozen object) is wrapped in an error that keeps it as its
- * `cause`.
+ * Remembers the row `createWithHooks` had already created when `error` was
+ * thrown afterwards, so that a caller can tell such a failure from one the
+ * insert itself raised. A thrown value that cannot be remembered (a primitive)
+ * is wrapped in an error that keeps it as its `cause`.
  */
 function markCreatedRow(error: unknown, created: unknown): unknown {
 	if (typeof error === "object" && error !== null) {
-		try {
-			Object.defineProperty(error, createdRow, { value: created });
-			return error;
-		} catch {
-			// Frozen: fall through to the wrapper below.
-		}
+		createdRows.set(error, created);
+		return error;
 	}
 	const wrapper = new Error(
 		"A create.after hook failed after the row was created",
-		{
-			cause: error,
-		},
+		{ cause: error },
 	);
-	Object.defineProperty(wrapper, createdRow, { value: created });
+	createdRows.set(wrapper, created);
 	return wrapper;
 }
 
@@ -52,7 +45,7 @@ function markCreatedRow(error: unknown, created: unknown): unknown {
  */
 export function getCreatedRow<T>(error: unknown): T | undefined {
 	return typeof error === "object" && error !== null
-		? ((error as Record<symbol, T>)[createdRow] ?? undefined)
+		? (createdRows.get(error) as T | undefined)
 		: undefined;
 }
 
