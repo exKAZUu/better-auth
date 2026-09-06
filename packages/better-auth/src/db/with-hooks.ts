@@ -104,19 +104,24 @@ export function getWithHooks(
 		}
 
 		let created: any = null;
+		let stored = false;
 		if (!customCreateFn || customCreateFn.executeMainFn) {
 			created = await (await getCurrentAdapter(adapter)).create<T>({
 				model,
 				data: actualData as any,
 				forceAllowId: true,
 			});
+			stored = true;
 		}
 
-		// Everything from here on runs after the row exists, so a failure must be
-		// distinguishable from one the insert itself raised.
+		// A failure from here on must be distinguishable from one the insert
+		// raised, but only once the row is actually stored somewhere: the custom
+		// function is the only store when the adapter create was skipped, so its
+		// own failure leaves nothing behind.
 		try {
 			if (customCreateFn?.fn) {
 				created = await customCreateFn.fn(created ?? actualData);
+				stored = true;
 			}
 
 			for (const { source, hooks } of hooksEntries) {
@@ -138,7 +143,7 @@ export function getWithHooks(
 				}
 			}
 		} catch (error) {
-			throw markCreatedRow(error, created ?? actualData);
+			throw stored ? markCreatedRow(error, created ?? actualData) : error;
 		}
 
 		return created;

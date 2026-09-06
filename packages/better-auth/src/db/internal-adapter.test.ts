@@ -632,6 +632,34 @@ describe("internal adapter test", async () => {
 		expect([...storage.keys()]).toEqual([]);
 	});
 
+	it("should not mark a storage-only write failure as a created row", async () => {
+		const storage = new Map<string, string>();
+		let failWrite = false;
+		const base = createStringSecondaryStorage(storage, new Map());
+		const storageOnlyOpts = {
+			database: new DatabaseSync(":memory:"),
+			secondaryStorage: {
+				...base,
+				set: async (...args: Parameters<typeof base.set>) => {
+					if (failWrite) throw new Error("cache unavailable");
+					return base.set(...args);
+				},
+			},
+		} satisfies BetterAuthOptions;
+		(await getMigrations(storageOnlyOpts)).runMigrations();
+		const storageOnlyCtx = await init(storageOnlyOpts);
+
+		// The cache is the only store here, so its failure stored nothing.
+		failWrite = true;
+		await expect(
+			storageOnlyCtx.internalAdapter.createVerificationValue({
+				identifier: "storage-only-write-failure",
+				value: "unstored:0",
+				expiresAt: new Date(Date.now() + 60_000),
+			}),
+		).rejects.toSatisfy((error: unknown) => getCreatedRow(error) === undefined);
+	});
+
 	it("should report a secondary-storage failure that happens after the row was inserted", async () => {
 		const storage = new Map<string, string>();
 		let failWrite = false;
