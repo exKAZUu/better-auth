@@ -23,17 +23,27 @@ const createdRow = Symbol("better-auth.createdRow");
 /**
  * Attaches the row `createWithHooks` had already created to an error thrown
  * afterwards (by a `create.after` hook), so that a caller can tell it from an
- * error thrown by the insert itself.
+ * error thrown by the insert itself. A value that cannot carry the row (a
+ * primitive, or a frozen object) is wrapped in an error that keeps it as its
+ * `cause`.
  */
 function markCreatedRow(error: unknown, created: unknown): unknown {
 	if (typeof error === "object" && error !== null) {
 		try {
 			Object.defineProperty(error, createdRow, { value: created });
+			return error;
 		} catch {
-			// A frozen error cannot carry the row; the caller then sees a plain error.
+			// Frozen: fall through to the wrapper below.
 		}
 	}
-	return error;
+	const wrapper = new Error(
+		"A create.after hook failed after the row was created",
+		{
+			cause: error,
+		},
+	);
+	Object.defineProperty(wrapper, createdRow, { value: created });
+	return wrapper;
 }
 
 /**

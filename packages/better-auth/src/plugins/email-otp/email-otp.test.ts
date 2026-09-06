@@ -2835,6 +2835,44 @@ describe("email-otp concurrent sends on a unique verification identifier", async
 		expect(res.data?.token).toBeDefined();
 	});
 
+	it("should fail the request when a create hook throws a value that is not an error", async () => {
+		const otps: string[] = [];
+		const { client } = await getTestInstance(
+			{
+				databaseHooks: {
+					verification: {
+						create: {
+							after: async () => {
+								// oxlint-disable-next-line no-throw-literal
+								throw "audit log unavailable";
+							},
+						},
+					},
+				},
+				plugins: [
+					uniqueVerificationIdentifier,
+					emailOTP({
+						async sendVerificationOTP({ otp }) {
+							otps.push(otp);
+						},
+					}),
+				],
+			},
+			{
+				clientOptions: {
+					plugins: [emailOTPClient()],
+				},
+			},
+		);
+
+		const result = await client.emailOtp.sendVerificationOtp({
+			email: "create-hook-primitive@example.com",
+			type: "sign-in",
+		});
+		expect(result.error).not.toBeNull();
+		expect(otps).toHaveLength(0);
+	});
+
 	it.each([
 		{ ids: "generated", advanced: {} },
 		{
