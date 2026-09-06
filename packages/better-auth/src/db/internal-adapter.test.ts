@@ -575,6 +575,42 @@ describe("internal adapter test", async () => {
 		).toMatchObject({ id: current.id, expiresAt });
 	});
 
+	it("should update by id a cached row that is only reachable through the plain key", async () => {
+		const storage = new Map<string, string>();
+		const storageOnlyOpts = {
+			database: new DatabaseSync(":memory:"),
+			secondaryStorage: createStringSecondaryStorage(storage, new Map()),
+			verification: { storeIdentifier: "hashed" as const },
+		} satisfies BetterAuthOptions;
+		(await getMigrations(storageOnlyOpts)).runMigrations();
+		const storageOnlyCtx = await init(storageOnlyOpts);
+		const identifier = "update-by-id-legacy-cache";
+
+		// A row cached before `storeIdentifier` was enabled sits under the plain
+		// key, which is where the reader found it, so that is where it is updated.
+		const legacy = {
+			id: "legacy-id",
+			identifier,
+			value: "legacy:0",
+			expiresAt: new Date(Date.now() + 60_000).toISOString(),
+		};
+		const plainKey = `verification:${identifier}`;
+		storage.set(plainKey, JSON.stringify(legacy));
+
+		const expiresAt = new Date(Date.now() + 120_000);
+		const updated = await storageOnlyCtx.internalAdapter.updateVerificationById(
+			identifier,
+			legacy.id,
+			{ expiresAt },
+		);
+		expect(updated).toMatchObject({ id: legacy.id, value: "legacy:0" });
+		expect(JSON.parse(storage.get(plainKey)!)).toMatchObject({
+			id: legacy.id,
+			value: "legacy:0",
+			expiresAt: expiresAt.toISOString(),
+		});
+	});
+
 	it("should not write a phantom cached row when updating by id misses the cache", async () => {
 		const storage = new Map<string, string>();
 		const storageOnlyOpts = {

@@ -226,6 +226,32 @@ export const createInternalAdapter = (
 		}
 	}
 
+	/**
+	 * Whether `id` addresses the cached row. A row stored without an id (kept
+	 * only in secondary storage before this method existed) is addressed by
+	 * no id at all, so it is never matched.
+	 */
+	const addressesRow = (
+		row: Verification | null,
+		id: string,
+	): row is Verification => row?.id !== undefined && row.id === id;
+
+	/**
+	 * The cache keys a verification row can live under: the current one, and
+	 * for a non-plain `storeIdentifier` the plain key a row written before
+	 * that setting still uses.
+	 */
+	const verificationCacheKeys = async (identifier: string) => {
+		const storageOption = getStorageOption(
+			identifier,
+			options.verification?.storeIdentifier,
+		);
+		const storedIdentifier = await processIdentifier(identifier, storageOption);
+		return storageOption && storageOption !== "plain"
+			? [`verification:${storedIdentifier}`, `verification:${identifier}`]
+			: [`verification:${storedIdentifier}`];
+	};
+
 	return {
 		createOAuthUser: async (
 			user: Omit<User, "id" | "createdAt" | "updatedAt">,
@@ -1347,20 +1373,12 @@ export const createInternalAdapter = (
 			}
 		},
 		deleteVerificationById: async (identifier: string, id: string) => {
-			const storageOption = getStorageOption(
-				identifier,
-				options.verification?.storeIdentifier,
-			);
-			const storedIdentifier = await processIdentifier(
-				identifier,
-				storageOption,
-			);
-
 			if (secondaryStorage) {
-				const key = `verification:${storedIdentifier}`;
-				const cached = await secondaryStorage.get(key);
-				if (cached && safeJSONParse<Verification>(cached)?.id === id) {
-					await secondaryStorage.delete(key);
+				for (const key of await verificationCacheKeys(identifier)) {
+					const cached = await secondaryStorage.get(key);
+					if (cached && addressesRow(safeJSONParse<Verification>(cached), id)) {
+						await secondaryStorage.delete(key);
+					}
 				}
 			}
 
@@ -1657,31 +1675,27 @@ export const createInternalAdapter = (
 			id: string,
 			data: Partial<Verification>,
 		) => {
-			const storageOption = getStorageOption(
-				identifier,
-				options.verification?.storeIdentifier,
-			);
-			const storedIdentifier = await processIdentifier(
-				identifier,
-				storageOption,
-			);
-			const key = `verification:${storedIdentifier}`;
+			const keys = secondaryStorage
+				? await verificationCacheKeys(identifier)
+				: [];
 
 			if (secondaryStorage && !options.verification?.storeInDatabase) {
-				const cached = await secondaryStorage.get(key);
-				const parsed = cached ? safeJSONParse<Verification>(cached) : null;
-				if (!parsed || parsed.id !== id) {
-					return null;
+				for (const key of keys) {
+					const cached = await secondaryStorage.get(key);
+					const parsed = cached ? safeJSONParse<Verification>(cached) : null;
+					if (!addressesRow(parsed, id)) continue;
+
+					const updated = { ...parsed, ...data };
+					const expiresAt = updated.expiresAt;
+					const ttl = getTTLSeconds(
+						expiresAt instanceof Date ? expiresAt : new Date(expiresAt),
+					);
+					if (ttl > 0) {
+						await secondaryStorage.set(key, JSON.stringify(updated), ttl);
+					}
+					return updated;
 				}
-				const updated = { ...parsed, ...data };
-				const expiresAt = updated.expiresAt;
-				const ttl = getTTLSeconds(
-					expiresAt instanceof Date ? expiresAt : new Date(expiresAt),
-				);
-				if (ttl > 0) {
-					await secondaryStorage.set(key, JSON.stringify(updated), ttl);
-				}
-				return updated;
+				return null;
 			}
 
 			// The database decides whether the row is still there. The cache entry is
@@ -1695,12 +1709,14 @@ export const createInternalAdapter = (
 				undefined,
 			);
 			if (secondaryStorage) {
-				const cached = await secondaryStorage.get(key);
-				if (
-					cached &&
-					(updated || safeJSONParse<Verification>(cached)?.id === id)
-				) {
-					await secondaryStorage.delete(key);
+				for (const key of keys) {
+					const cached = await secondaryStorage.get(key);
+					if (
+						cached &&
+						(updated || addressesRow(safeJSONParse<Verification>(cached), id))
+					) {
+						await secondaryStorage.delete(key);
+					}
 				}
 			}
 			return updated;
