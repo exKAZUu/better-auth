@@ -111,11 +111,14 @@ export function getWithHooks(
 				forceAllowId: true,
 			});
 		}
-		if (customCreateFn?.fn) {
-			created = await customCreateFn.fn(created ?? actualData);
-		}
 
+		// Everything from here on runs after the row exists, so a failure must be
+		// distinguishable from one the insert itself raised.
 		try {
+			if (customCreateFn?.fn) {
+				created = await customCreateFn.fn(created ?? actualData);
+			}
+
 			for (const { source, hooks } of hooksEntries) {
 				const toRun = hooks[model]?.create?.after;
 				if (toRun) {
@@ -135,7 +138,7 @@ export function getWithHooks(
 				}
 			}
 		} catch (error) {
-			throw markCreatedRow(error, created);
+			throw markCreatedRow(error, created ?? actualData);
 		}
 
 		return created;

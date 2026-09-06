@@ -18,6 +18,7 @@ import type {
 	Verification,
 } from "../types";
 import { getMigrations } from "./get-migration";
+import { getCreatedRow } from "./with-hooks";
 
 function createStringSecondaryStorage(
 	store: Map<string, string>,
@@ -629,6 +630,34 @@ describe("internal adapter test", async () => {
 		);
 		expect(updated).toBeNull();
 		expect([...storage.keys()]).toEqual([]);
+	});
+
+	it("should report a secondary-storage failure that happens after the row was inserted", async () => {
+		const storage = new Map<string, string>();
+		let failWrite = false;
+		const base = createStringSecondaryStorage(storage, new Map());
+		const mirroredOpts = {
+			database: new DatabaseSync(":memory:"),
+			secondaryStorage: {
+				...base,
+				set: async (...args: Parameters<typeof base.set>) => {
+					if (failWrite) throw new Error("cache unavailable");
+					return base.set(...args);
+				},
+			},
+			verification: { storeInDatabase: true },
+		} satisfies BetterAuthOptions;
+		(await getMigrations(mirroredOpts)).runMigrations();
+		const mirroredCtx = await init(mirroredOpts);
+
+		failWrite = true;
+		await expect(
+			mirroredCtx.internalAdapter.createVerificationValue({
+				identifier: "create-mirror-failure",
+				value: "mirrored:0",
+				expiresAt: new Date(Date.now() + 60_000),
+			}),
+		).rejects.toSatisfy((error: unknown) => getCreatedRow(error) !== undefined);
 	});
 
 	it("should update a cached row that carries no id, as storage-only rows do", async () => {
