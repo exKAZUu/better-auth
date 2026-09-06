@@ -539,7 +539,7 @@ describe("internal adapter test", async () => {
 		const replaced = await cachedCtx.internalAdapter.createVerificationValue({
 			identifier,
 			value: "old",
-			expiresAt: new Date(Date.now() + 1000),
+			expiresAt: new Date(Date.now() + 60_000),
 		});
 		await cachedCtx.internalAdapter.deleteVerificationById(
 			identifier,
@@ -548,7 +548,7 @@ describe("internal adapter test", async () => {
 		const current = await cachedCtx.internalAdapter.createVerificationValue({
 			identifier,
 			value: "new",
-			expiresAt: new Date(Date.now() + 1000),
+			expiresAt: new Date(Date.now() + 60_000),
 		});
 
 		// A reader that still holds the replaced row tries to extend it while a
