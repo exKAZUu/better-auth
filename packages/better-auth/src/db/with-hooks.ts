@@ -21,27 +21,27 @@ export type DatabaseHooksEntry = {
 const createdRows = new WeakMap<object, unknown>();
 
 /**
- * Remembers the row `createWithHooks` had already created when `error` was
- * thrown afterwards, so that a caller can tell such a failure from one the
- * insert itself raised. A thrown value that cannot be remembered (a primitive)
- * is wrapped in an error that keeps it as its `cause`.
+ * Remembers the row `createWithHooks` had already stored when `error` was
+ * thrown by a later step (the secondary-storage write or a `create.after`
+ * hook), so that a caller can tell such a failure from one the insert itself
+ * raised. A thrown value that cannot be remembered (a primitive) is wrapped in
+ * an error that keeps it as its `cause`.
  */
 function markCreatedRow(error: unknown, created: unknown): unknown {
 	if (typeof error === "object" && error !== null) {
 		createdRows.set(error, created);
 		return error;
 	}
-	const wrapper = new Error(
-		"A create.after hook failed after the row was created",
-		{ cause: error },
-	);
+	const wrapper = new Error("A step after the row was stored failed", {
+		cause: error,
+	});
 	createdRows.set(wrapper, created);
 	return wrapper;
 }
 
 /**
- * The row that `createWithHooks` had created when `error` was thrown, or
- * `undefined` when the error came from the insert itself.
+ * The row that `createWithHooks` had stored when `error` was thrown, or
+ * `undefined` when the error came from storing it.
  */
 export function getCreatedRow<T>(error: unknown): T | undefined {
 	return typeof error === "object" && error !== null

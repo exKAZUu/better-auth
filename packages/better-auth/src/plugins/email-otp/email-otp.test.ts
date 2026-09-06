@@ -2843,7 +2843,6 @@ describe("email-otp concurrent sends on a unique verification identifier", async
 					verification: {
 						create: {
 							after: async () => {
-								// oxlint-disable-next-line no-throw-literal
 								throw "audit log unavailable";
 							},
 						},
