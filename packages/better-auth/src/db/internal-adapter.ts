@@ -227,14 +227,14 @@ export const createInternalAdapter = (
 	}
 
 	/**
-	 * Whether `id` addresses the cached row. A row stored without an id (kept
-	 * only in secondary storage before this method existed) is addressed by
-	 * no id at all, so it is never matched.
+	 * Whether `id` addresses the cached row. Rows kept only in secondary storage
+	 * carry no id, and a reader of such a row passes none either, so the two
+	 * match; a key that holds nothing is addressed by no id at all.
 	 */
 	const addressesRow = (
 		row: Verification | null,
 		id: string,
-	): row is Verification => row?.id !== undefined && row.id === id;
+	): row is Verification => row !== null && row.id === id;
 
 	/**
 	 * The cache keys a verification row can live under: the current one, and

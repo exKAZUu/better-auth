@@ -611,7 +611,7 @@ describe("internal adapter test", async () => {
 		});
 	});
 
-	it("should not write a phantom cached row when updating by id misses the cache", async () => {
+	it("should not write a phantom cached row when updating by id misses every key", async () => {
 		const storage = new Map<string, string>();
 		const storageOnlyOpts = {
 			database: new DatabaseSync(":memory:"),
@@ -620,28 +620,46 @@ describe("internal adapter test", async () => {
 		} satisfies BetterAuthOptions;
 		(await getMigrations(storageOnlyOpts)).runMigrations();
 		const storageOnlyCtx = await init(storageOnlyOpts);
-
-		// A row cached before `storeIdentifier` was enabled sits under the plain
-		// key and carries no id, so its reader passes `undefined` as the id.
-		const legacy = {
-			identifier: "update-by-id-cache-miss",
-			value: "legacy:0",
-			expiresAt: new Date(Date.now() + 60_000),
-		};
-		storage.set(`verification:${legacy.identifier}`, JSON.stringify(legacy));
+		const identifier = "update-by-id-cache-miss";
 
 		const updated = await storageOnlyCtx.internalAdapter.updateVerificationById(
-			legacy.identifier,
+			identifier,
 			undefined as unknown as string,
 			{ expiresAt: new Date(Date.now() + 120_000) },
 		);
 		expect(updated).toBeNull();
-		expect([...storage.keys()]).toEqual([`verification:${legacy.identifier}`]);
+		expect([...storage.keys()]).toEqual([]);
+	});
+
+	it("should update a cached row that carries no id, as storage-only rows do", async () => {
+		const storage = new Map<string, string>();
+		const storageOnlyOpts = {
+			database: new DatabaseSync(":memory:"),
+			secondaryStorage: createStringSecondaryStorage(storage, new Map()),
+		} satisfies BetterAuthOptions;
+		(await getMigrations(storageOnlyOpts)).runMigrations();
+		const storageOnlyCtx = await init(storageOnlyOpts);
+		const identifier = "update-by-id-without-id";
+
+		const stored = await storageOnlyCtx.internalAdapter.createVerificationValue(
+			{
+				identifier,
+				value: "no-id:0",
+				expiresAt: new Date(Date.now() + 60_000),
+			},
+		);
+		expect(stored.id).toBeUndefined();
+
+		const expiresAt = new Date(Date.now() + 120_000);
+		const updated = await storageOnlyCtx.internalAdapter.updateVerificationById(
+			identifier,
+			stored.id,
+			{ expiresAt },
+		);
+		expect(updated).toMatchObject({ value: "no-id:0", expiresAt });
 		expect(
-			await storageOnlyCtx.internalAdapter.findVerificationValue(
-				legacy.identifier,
-			),
-		).toMatchObject({ value: "legacy:0" });
+			await storageOnlyCtx.internalAdapter.findVerificationValue(identifier),
+		).toMatchObject({ value: "no-id:0", expiresAt });
 	});
 
 	it("should run the after-update hook only when updating by id matched a row", async () => {
